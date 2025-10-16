@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Using Inter as the primary font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>NeuralVault | SubSync</title>
+</head>
+<style>
+    /* --- Clean White Theme Configuration --- */
+
+    body {
+        font-family: 'Inter', sans-serif;
+        /* Set to a solid, light background */
+        background-color: #F9FAFB; /* Equivalent to Tailwind bg-gray-50 */
+    }
+
+    /* Custom scrollbar for the notes list and editor area */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #F3F4F6; /* Light gray track */
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #D1D5DB; /* Medium gray thumb */
+        border-radius: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #9CA3AF;
+    }
+
+    /* Ensure the note content area looks like a document */
+    #note-summary-content {
+        /* Solid white background */
+        background-color: white; 
+        box-shadow: none; 
+        min-height: 400px;
+        padding: 2rem;
+        outline: none;
+        cursor: text;
+        line-height: 1.6;
+        font-size: 1rem;
+        border-radius: 16px;
+        /* Added light border for definition */
+        border: 1px solid #E5E7EB; 
+    }
+    
+    /* Sidebar list item hover/active states */
+    #notes-list li a {
+        padding: 1rem 1.5rem; 
+        border-left: 3px solid transparent; 
+        transition: background-color 0.2s, border-left-color 0.2s;
+    }
+
+    #notes-list li a:hover {
+        background-color: #F3F4F6; /* Light hover effect (bg-gray-100) */
+    }
+    
+    /* Active state style (A subtle blue tint) */
+    #notes-list li a.active {
+        background-color: #EBF5FF; /* Tailwind blue-50 */
+        border-left-color: #1D4ED8; /* Primary Blue */
+    }
+    
+    #notes-list li a.active div.font-semibold {
+        color: #1D4ED8 !important; /* Primary Blue */
+    }
+    
+    #notes-list li a.active div.text-sm {
+        color: #4B5563 !important; /* Darker gray for contrast */
+    }
+    
+    /* Intro State adjustments */
+    #intro-section {
+        display: none; 
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        min-height: 80vh; 
+        color: #4B5563; 
+    }
+
+    /* Small responsive safety so sidebar doesn't overlap on very small viewports */
+    @media (max-width: 800px) {
+        #sidebar { min-width: 260px !important; }
+    }
+
+</style>
+<body>
+
+    <!-- Removed absolute positioning classes from body wrapper -->
+    <div class="relative h-screen font-inter p-6">
+        
+        <!-- Exit Button removed from here -->
+
+        <div class="flex h-full">
+            <!-- Sidebar - Flex column layout allows the Exit button to push to the bottom -->
+            <!-- UPDATED: widened sidebar from 300px -> 360px and added min-width so it doesn't collapse -->
+            <aside id="sidebar" class="w-[360px] min-w-[320px] flex flex-col bg-white rounded-2xl shadow-xl mr-6 h-full overflow-hidden">
+                <!-- Sidebar Header/Search -->
+                <div class="p-5 border-b border-solid border-gray-200">
+                    <h2 class="text-2xl font-extrabold text-gray-900 flex items-center">
+                       <svg class="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-5a3 3 0 00-3-3H8a3 3 0 00-3 3v5h5M12 10V4"></path></svg>
+                       NeuralVault
+                    </h2>
+                    <div class="mt-5 relative">
+                        <!-- increased left padding so icon + text have more room -->
+                        <input type="text" id="sidebar-search" placeholder="Search notes..." class="w-full p-3 pl-12 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out bg-white placeholder-gray-500 text-gray-800">
+                        <svg class="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                </div>
+                
+                <!-- Notes List - flex-grow ensures this section takes up all available space -->
+                <div class="flex-grow overflow-y-auto custom-scrollbar divide-y divide-gray-200">
+                    <ul id="notes-list" class="list-none p-0 m-0">
+                        <!-- Notes will be injected here by JavaScript -->
+                        <li id="loading-message" class="p-4 text-center text-gray-600 hidden">Loading notes...</li>
+                        <li id="empty-message" class="p-4 text-center text-gray-600 hidden">No notes saved yet.</li>
+                    </ul>
+                </div>
+                
+                <!-- Exit Button - Fixed to the bottom of the sidebar -->
+                <div class="p-4 border-t border-gray-200">
+                   <a href="/" style="text-decoration: none;">
+                    <button id="exit-button" class="w-full py-2 text-sm font-semibold text-red-600 rounded-lg hover:bg-red-50 transition duration-150 border border-transparent hover:border-red-200" onclick="handleExit()">
+                        Exit Vault
+                    </button></a>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="flex-grow flex flex-col overflow-y-auto custom-scrollbar">
+                
+                <!-- Intro State -->
+                <div id="intro-section" class="flex-grow bg-white rounded-2xl shadow-xl p-8 flex">
+                   <div class="flex flex-col items-center justify-center text-center w-full">
+                       <svg class="w-16 h-16 text-blue-500 mb-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                       <h3 class="text-3xl font-bold text-gray-800">Welcome to Your Neural Vault</h3>
+                       <p class="mt-3 text-lg text-gray-600 max-w-lg">Select a note from the left sidebar to view or edit its content. All changes are saved automatically.</p>
+                   </div>
+                </div>
+
+                <!-- Note Detail View (Hidden until a note is selected) -->
+                <div id="note-detail-view" class="flex-grow flex flex-col hidden">
+                    
+                    <!-- Note Title -->
+                    <input type="text" id="note-title" class="w-full text-5xl font-extrabold text-gray-900 bg-transparent border-0 focus:outline-none mb-6 p-0" placeholder="Untitled Note" />
+                    
+                    <!-- Metadata and Tags -->
+                    <div class="flex flex-wrap items-center justify-between text-sm text-gray-500 mb-6">
+                        <span id="note-creation-date" class="text-sm font-medium text-gray-600"></span>
+                        <div id="note-tags" class="flex flex-wrap gap-2 mt-2 sm:mt-0">
+                            <!-- Tags will be injected here -->
+                        </div>
+                    </div>
+
+                    <!-- Formatting Toolbar -->
+                    <div id="formatting-toolbar" class="flex gap-1 p-2 bg-white shadow-lg mb-6 sticky top-0 z-10 rounded-xl border border-gray-200">
+                        <button data-command="bold" class="p-2 rounded-lg hover:bg-gray-100 font-bold text-gray-700 transition duration-150" title="Bold">B</button>
+                        <button data-command="italic" class="p-2 rounded-lg hover:bg-gray-100 italic text-gray-700 transition duration-150" title="Italic">I</button>
+                        <button data-command="underline" class="p-2 rounded-lg hover:bg-gray-100 underline text-gray-700 transition duration-150" title="Underline">U</button>
+                        <div class="border-l border-gray-300 mx-2"></div>
+                        <button data-command="insertUnorderedList" class="p-2 rounded-lg hover:bg-gray-100 text-gray-700 transition duration-150" title="Bullet List">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path><circle cx="6" cy="6" r="1.5" /><circle cx="6" cy="10" r="1.5" /><circle cx="6" cy="14" r="1.5" /><circle cx="6" cy="18" r="1.5" /></svg>
+                        </button>
+                        <button data-command="insertOrderedList" class="p-2 rounded-lg hover:bg-gray-100 text-gray-700 transition duration-150" title="Numbered List">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path><text x="3.5" y="8" class="text-xs" fill="currentColor">1.</text><text x="3.5" y="12" class="text-xs" fill="currentColor">2.</text><text x="3.5" y="16" class="text-xs" fill="currentColor">3.</text><text x="3.5" y="20" class="text-xs" fill="currentColor">4.</text></svg>
+                        </button>
+                    </div>
+
+                    <!-- Note Content/Summary Editor -->
+                    <div id="note-summary-content" contenteditable="true" class="flex-grow text-gray-800 custom-scrollbar focus:ring-2 focus:ring-blue-500/50 transition duration-150 ease-in-out shadow-lg">
+                        <!-- Note content will be loaded here -->
+                    </div>
+
+                    <!-- Save/Status Indicator -->
+                    <div class="mt-4 text-right">
+                       <span id="save-status" class="text-sm text-gray-600"></span>
+                    </div>
+                    
+                </div>
+
+            </main>
+        </div>
+    </div>
+    
+    <script>
+       // DOM Element references
+       const notesList = document.getElementById('notes-list');
+       const sidebarSearchInput = document.getElementById('sidebar-search');
+       const introSection = document.getElementById('intro-section');
+       const noteDetailView = document.getElementById('note-detail-view');
+       const formattingToolbar = document.getElementById('formatting-toolbar');
+       const noteTitleInput = document.getElementById('note-title');
+       const noteSummaryContent = document.getElementById('note-summary-content');
+       const noteCreationDateSpan = document.getElementById('note-creation-date');
+       const noteTagsDiv = document.getElementById('note-tags');
+       const saveStatusSpan = document.getElementById('save-status');
+       const loadingMessage = document.getElementById('loading-message');
+       const emptyMessage = document.getElementById('empty-message');
+       const exitButton = document.getElementById('exit-button');
+
+       // State variables
+       let currentNoteId = null;
+       let hasUnsavedChanges = false;
+       let allNotes = []; // Store all fetched notes here
+       let saveTimeout = null;
+       
+       // --- Exit Handler ---
+       function handleExit() {
+           // In a real application, this would redirect the user, e.g., to the homepage or dashboard.
+           console.log("Exit button clicked. Navigating away from the notes view.");
+           // Example of a minimal action if redirection isn't possible:
+           noteDetailView.style.display = 'none';
+           introSection.style.display = 'flex';
+           currentNoteId = null;
+           // Optionally redirect to dashboard
+           // window.location.href = '/dashboard'; 
+       }
+       window.handleExit = handleExit; // Expose to global scope for onclick attribute
+
+       // Utility functions
+       function setHasUnsavedChanges(value) {
+           // Status messages updated to reflect saving state
+           hasUnsavedChanges = value;
+           saveStatusSpan.textContent = value ? 'Unsaved changes...' : 'All changes saved.';
+           saveStatusSpan.classList.toggle('text-yellow-600', value);
+           saveStatusSpan.classList.toggle('text-green-600', !value);
+           // Remove blue saving status
+           saveStatusSpan.classList.remove('text-blue-500', 'text-red-600'); 
+       }
+
+       function trackContentChanges() {
+           setHasUnsavedChanges(true);
+           
+           // Clear previous timeout
+           if (saveTimeout) {
+               clearTimeout(saveTimeout);
+           }
+           
+           // Set a new timeout to save after 2 seconds of inactivity
+           saveTimeout = setTimeout(autoSaveNote, 2000);
+       }
+       
+       // --- Auto-Save Function (Real Implementation) ---
+       async function autoSaveNote() {
+           // Only proceed if there is an active note and unsaved changes
+           if (!currentNoteId || !hasUnsavedChanges) return;
+
+           // 1. Show Saving Status
+           saveStatusSpan.textContent = 'Saving...';
+           saveStatusSpan.classList.remove('text-yellow-600', 'text-green-600', 'text-red-600');
+           saveStatusSpan.classList.add('text-blue-500');
+
+           const updatedNote = {
+               title: noteTitleInput.value,
+               summary: noteSummaryContent.innerHTML,
+           };
+
+           console.log('Auto-saving note:', currentNoteId, updatedNote);
+
+           try {
+               // 2. PATCH request to the API endpoint
+               const response = await fetch(`/api/notes/${currentNoteId}`, {
+                   method: 'PATCH',
+                   headers: {
+                       'Content-Type': 'application/json'
+                   },
+                   body: JSON.stringify(updatedNote)
+               });
+               
+               if (!response.ok) {
+                   const errorData = await response.json();
+                   throw new Error(errorData.error || 'Failed to save note on the server.');
+               }
+               
+               // 3. Success: Update the local state
+               setHasUnsavedChanges(false);
+               
+               // 4. Update the note title and modified date in the local array and sidebar
+               const now = new Date().toISOString(); // Get current timestamp
+               const localNoteIndex = allNotes.findIndex(n => n._id === currentNoteId);
+               if (localNoteIndex !== -1) {
+                   allNotes[localNoteIndex].title = updatedNote.title;
+                   allNotes[localNoteIndex].modified_at = now; 
+               }
+               
+               // Update the visible title in the sidebar
+               const sidebarLinkTitle = document.querySelector(`#notes-list a[data-id="${currentNoteId}"] div.font-semibold`);
+               const sidebarLinkDate = document.querySelector(`#notes-list a[data-id="${currentNoteId}"] div.text-sm`);
+               if (sidebarLinkTitle) {
+                   sidebarLinkTitle.textContent = updatedNote.title;
+               }
+               if (sidebarLinkDate) {
+                   sidebarLinkDate.textContent = formatMongoDate(now);
+               }
+
+
+           } catch (error) {
+               // 5. Failure: Show error status
+               console.error("Save Error:", error.message);
+               saveStatusSpan.textContent = 'Save Failed! Check console for details.';
+               saveStatusSpan.classList.remove('text-blue-500', 'text-green-600');
+               saveStatusSpan.classList.add('text-red-600');
+           }
+       }
+
+       // --- Core Functions for Loading and Displaying Notes ---
+
+       function formatMongoDate(dateString) {
+           if (!dateString) return 'Unknown Date';
+           try {
+               // dateString is an ISO 8601 string from Python's .isoformat()
+               const date = new Date(dateString);
+               // Use Intl.DateTimeFormat for a readable, localized format
+               return date.toLocaleDateString('en-US', { 
+                   year: 'numeric', 
+                   month: 'short', 
+                   day: 'numeric', 
+                   hour: '2-digit', 
+                   minute: '2-digit' 
+               });
+           } catch (e) {
+               console.error("Invalid date format:", dateString, e);
+               return 'Invalid Date';
+           }
+       }
+       
+       // Function to populate the main editor view with a specific note's data
+       window.loadNote = function(noteId) {
+           const note = allNotes.find(n => n._id === noteId);
+           
+           if (!note) {
+               console.error("Note not found:", noteId);
+               return;
+           }
+           
+           // 1. Update main view state
+           currentNoteId = noteId;
+           setHasUnsavedChanges(false); // Reset save state on load
+           introSection.style.display = 'none';
+           noteDetailView.style.display = 'flex';
+           formattingToolbar.style.display = 'flex';
+           
+           // 2. Update note details
+           noteTitleInput.value = note.title;
+           // The content is saved as HTML in the 'summary' field
+           noteSummaryContent.innerHTML = note.summary; 
+           
+           // Display the date the note was last modified
+           const displayDate = note.modified_at || note.created_at; 
+           noteCreationDateSpan.textContent = 'Last Modified: ' + formatMongoDate(displayDate);
+           
+           // 3. Update tags
+           noteTagsDiv.innerHTML = '';
+           if (note.tags && Array.isArray(note.tags)) {
+               note.tags.forEach(tag => {
+                   const tagSpan = document.createElement('span');
+                   // Updated tag styling for the new white theme
+                   tagSpan.className = 'px-3 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full whitespace-nowrap shadow-sm';
+                   tagSpan.textContent = tag;
+                   noteTagsDiv.appendChild(tagSpan);
+               });
+           } else {
+                noteTagsDiv.innerHTML = '<span class="text-xs italic text-gray-500">No tags</span>';
+           }
+           
+           // 4. Update sidebar active state
+           document.querySelectorAll('#notes-list li a').forEach(link => {
+               link.classList.remove('active');
+           });
+           const activeLink = document.querySelector(`#notes-list a[data-id="${noteId}"]`);
+           if (activeLink) {
+               activeLink.classList.add('active');
+           }
+           
+           // Focus and scroll to the top of the content
+           noteSummaryContent.focus();
+           noteSummaryContent.scrollTo(0, 0);
+       }
+
+       // Function to fetch all notes and populate the sidebar
+       function fetchNotesForSidebar() {
+           notesList.innerHTML = ''; // Clear notes list
+           loadingMessage.classList.remove('hidden'); // Show loading
+           notesList.appendChild(loadingMessage); 
+           
+           allNotes = []; // Clear current notes list
+
+           // Fetch request is now handled by the backend, which returns notes sorted by modified_at
+           fetch('/api/notes') 
+               .then(response => {
+                   loadingMessage.classList.add('hidden'); // Hide loading
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   return response.json();
+               })
+               .then(data => {
+                   allNotes = data.notes; // Store all notes globally
+
+                   if (allNotes && allNotes.length > 0) {
+                       allNotes.forEach(note => {
+                           const noteElement = document.createElement('li');
+                           // Display the last modified date
+                           const displayDate = note.modified_at ? note.modified_at : note.created_at;
+                           noteElement.innerHTML = `
+                               <a href="#" data-id="${note._id}" class="flex flex-col transition duration-150 ease-in-out text-gray-800" onclick="event.preventDefault(); loadNote('${note._id}')">
+                                   <div class="font-semibold text-base truncate">${note.title || 'Untitled Note'}</div>
+                                   <div class="text-sm text-gray-500 mt-1">${formatMongoDate(displayDate)}</div>
+                               </a>
+                           `;
+                           notesList.appendChild(noteElement);
+                       });
+                       
+                       // Automatically load the newest note upon success
+                       loadNote(allNotes[0]._id);
+
+                   } else {
+                       // If no notes, ensure intro state is displayed
+                       introSection.style.display = 'flex';
+                       noteDetailView.style.display = 'none';
+                       formattingToolbar.style.display = 'none';
+                       emptyMessage.classList.remove('hidden');
+                       notesList.appendChild(emptyMessage);
+                   }
+               })
+               .catch(error => {
+                   console.error("Failed to fetch notes:", error);
+                   loadingMessage.classList.add('hidden');
+                   notesList.innerHTML = `<li class="p-4 text-center text-red-500">Failed to load notes. Please check connection and try again.</li>`;
+               });
+       }
+
+
+       // --- Event Listeners and Initial Setup ---
+
+       // Input listeners for auto-save
+       noteTitleInput.addEventListener('input', trackContentChanges);
+       noteSummaryContent.addEventListener('input', trackContentChanges);
+       
+       // Formatting Toolbar command execution
+        formattingToolbar.addEventListener('click', (event) => {
+            const button = event.target.closest('button');
+            if (button) {
+                const command = button.dataset.command;
+                const value = button.dataset.value;
+                if (command) {
+                    // Ensure focus is on the contenteditable area before executing command
+                    noteSummaryContent.focus(); 
+                    document.execCommand(command, false, value);
+                    trackContentChanges(); // Track changes after formatting
+                }
+            }
+        });
+
+
+       // Sidebar search logic
+       sidebarSearchInput.addEventListener('input', () => {
+           const query = sidebarSearchInput.value.toLowerCase();
+           const noteElements = notesList.querySelectorAll('li'); // Target the list item
+           
+           noteElements.forEach(li => {
+               const link = li.querySelector('a');
+               // Ensure link and title element exist before accessing textContent
+               const titleElement = link?.querySelector('div.font-semibold'); 
+               
+               if (titleElement) {
+                   const title = titleElement.textContent.toLowerCase();
+                   if (title.includes(query)) {
+                       li.style.display = 'block'; // Show the list item
+                   } else {
+                       li.style.display = 'none'; // Hide the list item
+                   }
+               }
+           });
+       });
+       
+       // Initial setup on page load
+       document.addEventListener('DOMContentLoaded', () => {
+           fetchNotesForSidebar();
+           introSection.style.display = 'flex'; 
+           noteDetailView.style.display = 'none';
+           formattingToolbar.style.display = 'none'; 
+           setHasUnsavedChanges(false); 
+       });
+
+    </script> 
+    
+</body>
+</html>
