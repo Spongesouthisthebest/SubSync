@@ -1,7 +1,7 @@
 import os
 import tempfile
 from datetime import timedelta
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 import certifi 
@@ -18,10 +18,10 @@ import time
 import subprocess 
 import shutil 
 from collections import Counter
+from io import BytesIO
 
 load_dotenv() 
 
-# --- Configuration and Environment Variables ---
 MONGO_URI = os.getenv(
     "MONGO_URI",
     "mongodb+srv://greensync:LljysdQhhLFxyG5t@cluster0.y31xe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
@@ -30,7 +30,6 @@ DB_NAME = os.getenv("DB_NAME", "SubSync")
 USERS_COLLECTION = os.getenv("USERS_COLLECTIONS", "user_data")
 SECRET_KEY = os.getenv("SECRET_KEY", "change_this_to_a_random_secret_in_prod")
 
-# --- Allowed File Extensions ---
 ALLOWED_EXTENSIONS = {'.mov', '.webm', '.mp4', '.mp3', '.wav'} 
 
 def serialize_doc(doc):
@@ -39,12 +38,9 @@ def serialize_doc(doc):
     Also handles datetime objects.
     """
     if doc:
-        # Convert MongoDB ObjectId to string
         doc['_id'] = str(doc['_id'])
-        # Convert user_id to string if it's an ObjectId
         if 'user_id' in doc and isinstance(doc['user_id'], ObjectId):
              doc['user_id'] = str(doc['user_id'])
-        # Convert datetime objects to ISO format string
         if 'created_at' in doc and isinstance(doc['created_at'], datetime.datetime):
              doc['created_at'] = doc['created_at'].isoformat()
     return doc
@@ -68,29 +64,24 @@ db = client_mongo[DB_NAME]
 users = db[USERS_COLLECTION]
 notes = db['notes'] 
 
-# --- Global storage for temporary files and their original names and segment data ---
-# Structure: {session_id: {path, filename, temp_name, vtt_path, vtt_name, segments, study_notes: {summary, tags}}}
 TEMP_FILE_STORAGE = {}
 
 
-
-# Helper to format seconds into WebVTT time format (HH:MM:SS.mmm)
+DEFAULT_IDRAK_MODEL = os.getenv("DEFAULT_IDRAK_MODEL", "./model")
 def format_timestamp(seconds):
     millis = int((seconds - int(seconds)) * 1000)
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02}:{minutes:02}:{seconds:02}.{millis:03}"
 
-# Helper to format seconds into SRT time format (HH:MM:SS,mmm)
 def format_srt_timestamp(seconds):
     millis = int((seconds - int(seconds)) * 1000)
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
-    # Note: SRT uses comma (,) as the decimal separator for milliseconds
     return f"{hours:02}:{minutes:02}:{seconds:02},{millis:03}"
 
 
-# --- Media Conversion Function (MODIFIED) ---
+
 def convert_to_mp4(input_path, session_id):
     """
     Converts the input video file to MP4 format (h264/aac) using FFmpeg, 
@@ -101,39 +92,35 @@ def convert_to_mp4(input_path, session_id):
     """
     input_ext = os.path.splitext(input_path)[1].lower()
     
-    # Only proceed with conversion if the file is .mov
+
     if input_ext != '.mov':
-        # If it's .mp4, .webm, .mp3, etc., return the original path/name
+
         print(f"File {os.path.basename(input_path)} is {input_ext}. Conversion to MP4 is not required.")
         return input_path, os.path.basename(input_path) 
 
-    # Check for FFmpeg availability
+
     if shutil.which("ffmpeg") is None:
         print("WARNING: FFmpeg not found. Cannot convert .mov video. Proceeding with original file.")
         return input_path, os.path.basename(input_path) 
 
     print(f"Converting {os.path.basename(input_path)} ({input_ext}) to MP4...")
     
-    # Create a new temporary file path for the output MP4
     output_filename = f"{session_id}_converted.mp4"
     output_path = os.path.join(tempfile.gettempdir(), output_filename)
-    
-    # FFmpeg command for robust conversion to h264/aac in an MP4 container
     cmd = [
         'ffmpeg',
         '-i', input_path,
         '-vcodec', 'libx264', 
         '-acodec', 'aac',    
-        '-b:v', '2000k',     # Set a target video bitrate
-        '-pix_fmt', 'yuv420p', # Ensures maximum player compatibility
+        '-b:v', '2000k',    
+        '-pix_fmt', 'yuv420p',
         '-y', output_path
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600) # 10 minute timeout
+        subprocess.run(cmd, check=True, capture_output=True, timeout=600) 
         print(f"Conversion successful. New file: {output_path}")
-        
-        # Clean up the original file after successful conversion
+
         os.remove(input_path) 
         
         return output_path, output_filename
@@ -141,15 +128,12 @@ def convert_to_mp4(input_path, session_id):
     except subprocess.CalledProcessError as e:
         print(f"Error converting video: {e.stderr.decode('utf-8')}")
         print("Conversion failed. Using original file for transcription (will likely fail with mov).")
-        # Do NOT remove original file on failure
         return input_path, os.path.basename(input_path) 
     except Exception as e:
         print(f"Conversion failed due to an unexpected error: {e}. Using original file.")
         return input_path, os.path.basename(input_path)
-# --- END Media Conversion Function ---
 
 
-# --- NEW: File Size Management for OpenAI ---
 def compress_to_audio_only(input_path, session_id):
     """
     Extracts only the audio stream and aggressively compresses it to MP3 at a low bitrate (64k)
@@ -167,21 +151,18 @@ def compress_to_audio_only(input_path, session_id):
         
     print(f"Compressing {os.path.basename(input_path)} to 64k MP3 for transcription...")
 
-    # FFmpeg command to extract audio and encode to MP3 at 64k bitrate
     cmd = [
         'ffmpeg',
         '-i', input_path,
-        '-vn', # no video (removes the video stream)
-        '-map', '0:a:0', # only map the first audio track
+        '-vn', 
+        '-map', '0:a:0', 
         '-c:a', 'libmp3lame', 
-        '-b:a', '64k', # Aggressive compression to minimize file size
+        '-b:a', '64k',
         '-y', audio_path
     ]
     
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300) 
-        
-        # Simple size check (though 64k MP3 is unlikely to be over 25MB)
         file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
         if file_size_mb > 25:
              print(f"WARNING: Compressed file is still {file_size_mb:.2f}MB, exceeding 25MB limit. Using original path on fallback.")
@@ -192,12 +173,10 @@ def compress_to_audio_only(input_path, session_id):
         
     except subprocess.CalledProcessError as e:
         print(f"Error compressing file to audio-only: {e.stderr.decode('utf-8')}")
-        # On failure, fall back to using the original path.
         return input_path
-# --- END File Size Management for OpenAI ---
 
 
-# --- LLM-based Emotion Prediction (EXISTING) ---
+
 def get_llm_emotion_prediction(text):
     EMOTIONS = ["Love", "Surprise", "Anger", "Fear", "Joy", "Sadness", "Neutral"] 
     prompt = (
@@ -229,10 +208,8 @@ def get_llm_emotion_prediction(text):
     except Exception as e:
         print(f"Error during LLM emotion prediction for text '{text}': {e}")
         return "Neutral" 
-# --- END LLM-based Emotion Prediction ---
 
 
-# --- NEW LLM-based Semantic Search Helper ---
 def perform_semantic_search(segments, query):
     """
     Uses an LLM to analyze transcript segments and find the top 3 most relevant segments 
@@ -241,10 +218,8 @@ def perform_semantic_search(segments, query):
     if not segments:
         return []
 
-    # 1. Format segments for LLM
     formatted_segments = []
     for i, s in enumerate(segments):
-        # We only send the necessary data for the search
         formatted_segments.append({
             "id": i,
             "start_time": s['start'],
@@ -338,19 +313,14 @@ def generate_semantic_map(summary, tags):
         raw_output = response.choices[0].message.content.strip()
         print(f"LLM Raw Output:\n{raw_output[:200]}...")
 
-        # --- FIX: Robust JSON Parsing ---
-        # 1. First, try direct parsing (best case)
         try:
             map_data = json.loads(raw_output)
             # Basic validation check
             if 'nodes' in map_data and 'edges' in map_data:
                 return map_data
         except json.JSONDecodeError:
-            # 2. If direct parsing fails, use regex to strip common LLM markdown wrappers
             print("Direct JSON parse failed. Attempting regex cleanup...")
             
-            # Regex to find JSON wrapped in ```json ... ``` or just { ... }
-            # The use of `re.DOTALL` is crucial for multi-line JSON strings
             match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*?\})', raw_output, re.DOTALL)
             
             if match:
@@ -606,7 +576,6 @@ def add_speaker_diarization(segments):
         print(f"Diarization failed ({e}). Retaining default 'Speaker 1' labels.")
 
     return segments
-# --- END Speaker Diarization Function ---
 
 
 def create_vtt_from_segments(segments):
@@ -622,7 +591,6 @@ def create_vtt_from_segments(segments):
         vtt_content += f"<v {speaker_tag}>{text}</v>\n\n"
     return vtt_content
 
-# Decorator for login requirement (EXISTING)
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -631,12 +599,48 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# Helper function (placeholder for database lookup, if needed)
 def find_user_by_username(username):
     if not username:
         return None
     return users.find_one({"username": username})
 
+@app.route('/download-srt', methods=['POST'])
+def download_srt():
+    """
+    Expects JSON: { "segments": [ { "start": float, "end": float, "speaker": str, "text": str }, ... ],
+                    "filename": "transcript.srt" }
+    Returns: SRT file as attachment
+    """
+    data = request.get_json(force=True, silent=True)
+    if not data or 'segments' not in data:
+        return jsonify({"error": "No segments provided"}), 400
+
+    segments = data['segments']
+    filename = data.get('filename', 'transcript.srt')
+
+    def seconds_to_srt(t):
+        total_ms = int(round(t * 1000))
+        hours = total_ms // 3600000
+        minutes = (total_ms % 3600000) // 60000
+        seconds = (total_ms % 60000) // 1000
+        ms = total_ms % 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{ms:03d}"
+
+    srt_lines = []
+    for i, seg in enumerate(segments, start=1):
+        start = seconds_to_srt(float(seg.get('start', 0.0)))
+        end = seconds_to_srt(float(seg.get('end', seg.get('start', 0.0) + 2)))
+        speaker = seg.get('speaker', '')
+        text = (seg.get('text', '') or '').replace('\r\n', ' ').replace('\n', ' ')
+        line = f"{i}\n{start} --> {end}\n{(speaker + ': ') if speaker else ''}{text}\n"
+        srt_lines.append(line)
+
+    srt_content = "\n".join(srt_lines)
+    headers = {
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'Content-Type': 'text/plain; charset=utf-8'
+    }
+    return Response(srt_content, headers=headers)
 
 
 @app.route("/")
