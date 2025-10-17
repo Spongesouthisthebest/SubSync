@@ -432,6 +432,14 @@
         background-color: rgba(255,255,255,0.02);
         cursor: pointer;
     }
+    #transcript-area {
+    background-color: rgba(255,255,255,0.06) !important; /* very light white tint */
+    backdrop-filter: blur(12px) saturate(120%) !important; /* stronger blur */
+    -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 6px 30px rgba(0,0,0,0.4);
+}
+
 
 /* ----------------- END: IDRAK ADDITIONS ----------------- */
 
@@ -499,6 +507,7 @@
             <div id="transcript-header">
                 <h3>Transcript:</h3>
                 <div id="action-buttons">
+                    <button id="downloadSrtButton" class="download-button" onclick="downloadSrtServer()" disabled>Download .srt</button>
                     <button id="viewStudyButton" class="analyze-button" onclick="openStudyNotesModal()" disabled>View Study Notes</button>
                     <button id="semanticSearchButton" class="search-button" onclick="openSemanticSearchModal()" disabled>Semantic Search</button>
                     <button id="analyzeButton" class="analyze-button" onclick="analyzeEmotion()">Analyze Emotion</button>
@@ -665,66 +674,84 @@
         /**
          * Toggles the UI state (loading, disabled buttons).
          */
-        function toggleUI(loading, processing) {
-            document.getElementById('loading-indicator').style.display = loading ? 'block' : 'none';
-            
-            const fileSelected = !!document.getElementById('audioFileInput').files[0];
-            
-            const captionButton = document.getElementById('captionModeButton');
-            const studyButton = document.getElementById('studyModeButton');
-            const analyzeButton = document.getElementById('analyzeButton');
-            const viewStudyButton = document.getElementById('viewStudyButton');
-            const searchButton = document.getElementById('semanticSearchButton'); 
+         function toggleUI(loading, processing) {
+    try {
+        document.getElementById('loading-indicator').style.display = loading ? 'block' : 'none';
 
-            // Caption Mode button only requires file to be selected
-            captionButton.disabled = processing || !fileSelected;
+        const fileSelected = !!document.getElementById('audioFileInput').files[0];
 
-            // Study Mode button is enabled once file is selected AND not currently processing
-            studyButton.disabled = processing || !fileSelected || (transcriptionSegments.length === 0 && !studyNotesCache);
+        const captionButton = document.getElementById('captionModeButton');
+        const studyButton = document.getElementById('studyModeButton');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const viewStudyButton = document.getElementById('viewStudyButton');
+        const searchButton = document.getElementById('semanticSearchButton');
 
-            // Action buttons require transcription to be complete
-            const transcriptionDone = transcriptionSegments.length > 0;
-            analyzeButton.disabled = processing || !transcriptionDone;
-            viewStudyButton.disabled = processing || !studyNotesCache;
-            searchButton.disabled = processing || !transcriptionDone; 
+        const downloadSrtButton = document.getElementById('downloadSrtButton');
 
-            // Save and Cognitive Map buttons inside modal
-            if (saveNotesButton) {
-                 saveNotesButton.disabled = processing || !studyNotesCache;
+        // compute transcription state early
+        const transcriptionDone = Array.isArray(transcriptionSegments) && transcriptionSegments.length > 0;
+        const studyAvailable = !!studyNotesCache;
+
+        // Caption Mode button only requires file to be selected and not processing
+        if (captionButton) captionButton.disabled = processing || !fileSelected;
+
+        // Study Mode requires a file (it will ask for caption if none)
+        if (studyButton) studyButton.disabled = processing || !fileSelected;
+
+        // Action buttons depend on whether transcription or study notes exist
+        if (analyzeButton) analyzeButton.disabled = processing || !transcriptionDone;
+        if (viewStudyButton) viewStudyButton.disabled = processing || !studyAvailable;
+        if (searchButton) searchButton.disabled = processing || !transcriptionDone;
+        if (downloadSrtButton) downloadSrtButton.disabled = processing || !transcriptionDone;
+
+        // Save and Cognitive Map buttons inside modal
+        if (saveNotesButton) {
+            saveNotesButton.disabled = processing || !studyAvailable;
+        }
+        if (cognitiveMapButton) {
+            cognitiveMapButton.disabled = processing || !studyAvailable;
+        }
+
+        // Hide results while processing/resetting
+        if (loading && processing) {
+            const mediaArea = document.getElementById('media-player-area');
+            const transcriptArea = document.getElementById('transcript-area');
+            if (mediaArea) {
+                mediaArea.style.opacity = '0';
+                mediaArea.style.display = 'none';
             }
-            if (cognitiveMapButton) { // NEW
-                 cognitiveMapButton.disabled = processing || !studyNotesCache;
+            if (transcriptArea) {
+                transcriptArea.style.opacity = '0';
+                transcriptArea.style.display = 'none';
             }
+            const fileErr = document.getElementById('file-error-message');
+            if (fileErr) fileErr.style.display = 'none';
 
-
-            // Hide results while processing/resetting
-            if (loading && processing) {
-                document.getElementById('media-player-area').style.opacity = '0';
-                document.getElementById('media-player-area').style.display = 'none';
-                document.getElementById('transcript-area').style.opacity = '0';
-                document.getElementById('transcript-area').style.display = 'none';
-                document.getElementById('file-error-message').style.display = 'none';
-                
-                const player = document.getElementById('media-player');
+            const player = document.getElementById('media-player');
+            if (player) {
                 player.src = '';
                 Array.from(player.querySelectorAll('track')).forEach(track => track.remove());
-                
-                // Clear state
-                transcriptionSegments = [];
-                currentHighlightedSegment = null;
-                studyNotesCache = null; // Clear cache
-                
-                // Re-disable action buttons as transcription is now empty
-                analyzeButton.disabled = true;
-                viewStudyButton.disabled = true; 
-                searchButton.disabled = true; 
             }
 
-            // After successful initial processing (in final block of uploadAndProcessAudio)
-            if (!loading && !processing && transcriptionDone) {
-                 studyButton.disabled = false;
-            }
+            // Clear state
+            transcriptionSegments = [];
+            currentHighlightedSegment = null;
+            studyNotesCache = null;
         }
+
+        // After successful initial processing
+        if (!loading && !processing && transcriptionDone) {
+            if (studyButton) studyButton.disabled = false;
+            if (downloadSrtButton) downloadSrtButton.disabled = false;
+            if (analyzeButton) analyzeButton.disabled = false;
+            if (searchButton) searchButton.disabled = false;
+        }
+
+    } catch (err) {
+        // Fail-safe: log error to console but don't break the rest of the script
+        console.error('toggleUI error:', err);
+    }
+}
         
         function syncTranscript() {
             // ... (existing logic for transcript synchronization)
@@ -1021,7 +1048,36 @@
             if (saveNotesButton) saveNotesButton.disabled = false;
             if (cognitiveMapButton) cognitiveMapButton.disabled = false; // NEW
         }
-        
+        async function downloadSrtServer(filename = 'transcript.srt') {
+    if (!transcriptionSegments || transcriptionSegments.length === 0) {
+        alert('No transcript available. Run Caption Mode first.');
+        return;
+    }
+    try {
+        const resp = await fetch('/download-srt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ segments: transcriptionSegments, filename })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(()=>({error:'unknown'}));
+            throw new Error(err.error || 'Server error');
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+        console.error('SRT download failed:', e);
+        alert('SRT download failed: ' + e.message);
+    }
+}
+
         /**
          * Calls the API to save the generated study notes to the database.
          */
@@ -1257,6 +1313,58 @@
             }
         }
 
+        function secondsToSrtTime(totalSeconds) {
+    const totalMs = Math.round(totalSeconds * 1000); // integer ms
+    const hours = Math.floor(totalMs / 3600000);
+    const minutes = Math.floor((totalMs % 3600000) / 60000);
+    const seconds = Math.floor((totalMs % 60000) / 1000);
+    const ms = totalMs % 1000;
+    const pad2 = n => String(n).padStart(2,'0');
+    const pad3 = n => String(n).padStart(3,'0');
+    return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)},${pad3(ms)}`;
+}
+
+/**
+ * Build SRT text from transcriptionSegments array.
+ * Each segment expected: { start: float_seconds, end: float_seconds, speaker: str?, text: str }
+ */
+function generateSrtFromSegments(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return '';
+    let srt = '';
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const index = i + 1;
+        const start = secondsToSrtTime(seg.start || 0);
+        const end = secondsToSrtTime(seg.end || (seg.start + 2 || 0));
+        // include speaker label if present
+        const speaker = seg.speaker ? `${seg.speaker}: ` : '';
+        // replace any CRLFs with single linebreaks for SRT safety
+        const text = (seg.text || '').replace(/\r\n|\r|\n/g, ' ');
+        srt += `${index}\n${start} --> ${end}\n${speaker}${text}\n\n`;
+    }
+    return srt;
+}
+
+/**
+ * Trigger client-side download of generated SRT
+ */
+function downloadSrtClient(filename = 'transcript.srt') {
+    if (!transcriptionSegments || transcriptionSegments.length === 0) {
+        alert('No transcript available. Run Caption Mode first.');
+        return;
+    }
+    const srtText = generateSrtFromSegments(transcriptionSegments);
+    const blob = new Blob([srtText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
         /**
          * Handles file upload and initial transcription/caption processing (Caption Mode).
          */
@@ -1392,3 +1500,4 @@
 
 </body>
 </html>
+
